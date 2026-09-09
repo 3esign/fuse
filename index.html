@@ -110,6 +110,22 @@
   .msg.ok { background: #123a1e; color: #a9f0c4; border: 1px solid #1f6b3a; }
   .footer { max-width: 720px; width: 100%; text-align: center; color: var(--dim); font-size: 12px; margin-top: 20px; line-height: 1.6; }
   .footer code { color: var(--dim); }
+  /* how to play */
+  .steps { display: grid; gap: 12px; margin-top: 4px; }
+  .step { display: grid; grid-template-columns: 30px 1fr; gap: 12px; align-items: start; }
+  .step .n {
+    width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+    background: linear-gradient(180deg, var(--ember2), var(--ember)); color: #180a00;
+    font-weight: 800; font-size: 14px;
+  }
+  .step .t { font-size: 14px; line-height: 1.55; padding-top: 4px; }
+  .step .t b { color: var(--text); }
+  .step .t span { color: var(--dim); }
+  .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(195px, 1fr)); gap: 10px; margin-top: 18px; }
+  .rule { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .rule .rk { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
+  .rule .rv { font-size: 15px; font-weight: 700; margin-top: 3px; }
+  .rule .rv em { font-style: normal; color: var(--ember2); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
@@ -161,6 +177,39 @@
     <button class="btn-primary" id="clickBtn" disabled>Connect a wallet to play</button>
   </div>
   <div id="clickMsg"></div>
+</div>
+
+<div class="card" id="howToPlayCard">
+  <div class="section-title">how to play</div>
+  <div class="steps">
+    <div class="step">
+      <div class="n">1</div>
+      <div class="t"><b>Connect Phantom.</b> <span>This is only your payout address — winnings are sent straight here. The game never holds your wallet's funds.</span></div>
+    </div>
+    <div class="step">
+      <div class="n">2</div>
+      <div class="t"><b>Fund the burner.</b> <span>A throwaway key generated in your browser. It signs every click for you, so there is no wallet popup in the middle of a race. Only put in what you are willing to click away.</span></div>
+    </div>
+    <div class="step">
+      <div class="n">3</div>
+      <div class="t"><b>Click the fuse.</b> <span>You become the holder and the fuse resets. If it burns all the way down while you are still the holder, the pot is yours.</span></div>
+    </div>
+  </div>
+
+  <div class="rules">
+    <div class="rule"><div class="rk">to win</div><div class="rv">be the <em>last</em> clicker</div></div>
+    <div class="rule"><div class="rk">winner takes</div><div class="rv"><em>90%</em> of the pot</div></div>
+    <div class="rule"><div class="rk">fuse length</div><div class="rv">300s, <em>−3s</em> per click</div></div>
+    <div class="rule"><div class="rk">click price</div><div class="rv">0.002 SOL, <em>+5%</em> each</div></div>
+    <div class="rule"><div class="rk">last 10 seconds</div><div class="rv"><em>3×</em> snipe tax</div></div>
+    <div class="rule"><div class="rk">rolls over</div><div class="rv"><em>9%</em> seeds next round</div></div>
+  </div>
+
+  <div class="dim" style="font-size:12px; margin-top:14px; line-height:1.6;">
+    Nobody runs the payout. When the fuse dies, the next click settles the previous round automatically and pays
+    the winner — or anyone can crank it manually and earn <b>1%</b> for doing so. There is no operator, no admin
+    key over the pot, and no queue to wait in.
+  </div>
 </div>
 
 <div class="card" id="tokenomicsCard">
