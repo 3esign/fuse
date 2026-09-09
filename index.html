@@ -115,6 +115,7 @@
     border-radius: 999px; padding: 4px 11px; font-size: 12px; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
   .dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+  .dot.warn { background: var(--ember2); box-shadow: 0 0 6px var(--ember2); }
 
   .receipts { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
   .receipt { display: flex; justify-content: space-between; gap: 10px; font-size: 12.5px; padding: 7px 10px;
@@ -163,7 +164,10 @@
 
 <div class="title-row">
   <div><span class="logo">FUSE<span>.</span></span><span class="tagline">last click before it burns out takes 90% of the pot</span></div>
-  <div class="pill"><span class="dot" id="liveDot"></span><span id="liveLabel">connecting…</span></div>
+  <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+    <div class="pill" id="immutablePill" title="reading the upgrade authority from the chain"><span class="dot"></span>checking code…</div>
+    <div class="pill"><span class="dot" id="liveDot"></span><span id="liveLabel">connecting…</span></div>
+  </div>
 </div>
 
 <div class="main-grid">
@@ -294,9 +298,9 @@
       anyone at all can crank it manually and earn <b>1%</b> for doing so. There is no server, no operator,
       no admin key over the pot and no queue to wait in. The program has exactly three instructions —
       init, click, settle — and no withdraw, no pause and no fee setter. The pot is a program-derived
-      address with no private key in existence, and the upgrade authority has been burned, so the code
-      that is deployed is the code that runs, permanently.
+      address with no private key in existence.
     </div>
+    <div class="dim" id="authLine" style="font-size:12.5px; line-height:1.65; margin-top:10px;">Reading the upgrade authority from the chain…</div>
     <div class="dim" style="font-size:12.5px; line-height:1.65; margin-top:10px;">
       The burner is a throwaway Ed25519 keypair generated in your browser (WebCrypto) and kept in this
       browser's local storage. It never touches Phantom and never leaves this device, so your loss is
@@ -978,6 +982,42 @@ function setReceipt(div, kind, label) {
   tag.textContent = label;
 }
 
+// Whether this program can still be replaced is the single load-bearing fact behind every other
+// guarantee on this page, so the page does not assert it — it reads it, on every load, and says
+// plainly whichever answer the chain gives. A program account's data is a 4-byte enum followed by
+// the address of its ProgramData account; ProgramData begins with a 4-byte enum, an 8-byte
+// last-deployed slot, and a 1-byte option flag that is 0 exactly when no upgrade authority exists.
+// The dataSlice keeps this to 45 bytes instead of pulling ~20KB of bytecode every minute.
+async function refreshImmutability() {
+  const pill = document.getElementById("immutablePill");
+  const line = document.getElementById("authLine");
+  try {
+    const prog = await rpc("getAccountInfo", [CONFIG.PROGRAM_ID, { encoding: "base64" }]).then((r) => r.value);
+    if (!prog || !prog.executable) throw new Error("program account not found");
+    const programData = MiniSol.b58encode(base64ToBytes(prog.data[0]).slice(4, 36));
+    const pd = await rpc("getAccountInfo", [programData, { encoding: "base64", dataSlice: { offset: 0, length: 45 } }]).then((r) => r.value);
+    const bytes = base64ToBytes(pd.data[0]);
+    const hasAuthority = bytes[12] === 1;
+    const link = '<a href="https://explorer.solana.com/address/' + programData + CONFIG.EXPLORER_CLUSTER_QS +
+                 '" target="_blank" rel="noopener">Check it yourself</a>.';
+    if (hasAuthority) {
+      const authority = MiniSol.b58encode(bytes.slice(13, 45));
+      pill.innerHTML = '<span class="dot warn"></span>upgradeable';
+      pill.title = "upgrade authority: " + authority;
+      line.innerHTML = 'The upgrade authority is <b>still held</b> by <span class="mono">' + authority +
+        '</span>, which means the deployed code could still be replaced. ' + link;
+    } else {
+      pill.innerHTML = '<span class="dot on"></span>immutable';
+      pill.title = "upgrade authority revoked — this program can never be replaced";
+      line.innerHTML = 'The upgrade authority is <b>revoked</b>. The bytecode running here can never be ' +
+        'replaced — not by the deployer, not by anyone. ' + link;
+    }
+  } catch (e) {
+    pill.innerHTML = '<span class="dot"></span>code status unknown';
+    line.textContent = "Could not read the upgrade authority just now — try again in a moment.";
+  }
+}
+
 let lastState = null;
 
 function renderState(state, fuseLamports) {
@@ -1129,6 +1169,9 @@ async function boot() {
   document.getElementById("burnerAddr").textContent = Burner.publicKeyB58;
   refreshClickButton();
   refreshBurnerBalance();
+
+  refreshImmutability();
+  setInterval(refreshImmutability, 60000);
 
   await refreshState();
   setInterval(refreshState, 1000);
