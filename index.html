@@ -319,11 +319,11 @@
 //   EXPLORER_CLUSTER_QS  -> "" (explorer defaults to mainnet-beta)
 // ============================================================================
 const CONFIG = {
-  RPC_URL: "https://api.devnet.solana.com",
-  PROGRAM_ID: "9KJyVDDvDMNbYDgpvCMJwWMWojidcETEkJ6i3APBBoLj",
-  FUSE_PDA: "FjZseExfY2VLaLF7GaQkfByX1ZCbGShritJNvbWyHw5q", // devnet fuse PDA, bump 255
-  IS_DEVNET: true,
-  EXPLORER_CLUSTER_QS: "?cluster=devnet",
+  RPC_URL: "https://solana-rpc.publicnode.com",
+  PROGRAM_ID: "HNTWQPT43UUx5y3tL9EPXddkQ7ceA4HLwxko88FuPYZf",
+  FUSE_PDA: "7nSnZPQqcM44nz8QZVPrMijdjnHgKFpFXNvJ1hSqyUMW", // mainnet fuse PDA, bump 255
+  IS_DEVNET: false,
+  EXPLORER_CLUSTER_QS: "",
   // Priority fee for the burner-signed transactions (click / settle / withdraw).
   // FUSE is a race: the last click before the fuse dies wins, so a click that sits in the
   // mempool during congestion is a click that loses to anyone paying for priority. Measured
