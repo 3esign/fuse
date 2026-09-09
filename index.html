@@ -657,7 +657,7 @@ async function fundBurner() {
       );
     }
     showMsg("walletMsg", "ok", "Burner funded.");
-    refreshBurnerBalance();
+    refreshBurnerBalance(10);
   } catch (e) {
     showMsg("walletMsg", "err", "Funding failed: " + (e.message || e));
   }
@@ -796,6 +796,23 @@ async function doClick() {
     // when the game is busiest. Passing the account when it is NOT needed costs nothing:
     // the program only ever reads it inside its expired branch and otherwise ignores it.
     const prevHolderB58 = state.clicks > 0n && state.holder ? state.holder : null;
+
+    // Check the burner can actually pay before building anything. Without this the failure
+    // surfaces as a bare "Transaction simulation failed" from the RPC preflight, which says
+    // nothing about the real cause — and the most common cause by far is clicking in the few
+    // seconds between funding the burner and that transfer being visible to the RPC.
+    const secsLeft = Number(state.deadline) - Date.now() / 1000;
+    const cost = (!expired && secsLeft > 0 && secsLeft <= 10) ? state.price * 3n : state.price;
+    const burnerBal = await rpc("getBalance", [Burner.publicKeyB58, { commitment: "confirmed" }])
+      .then((r) => BigInt(r.value))
+      .catch(() => null);
+    if (burnerBal !== null && burnerBal < cost + 20000n) {
+      throw new Error(
+        "the burner holds " + fmtSol(burnerBal, 4) + " SOL but this click costs " +
+        fmtSol(cost, 4) + " SOL plus fees. Fund the burner — and if you just did, give it a few " +
+        "seconds to show up before clicking."
+      );
+    }
 
     const ix = clickIx({
       payerB58: Burner.publicKeyB58,
@@ -937,13 +954,26 @@ function refreshSettleButton() {
   btn.disabled = !canSettle;
 }
 
-async function refreshBurnerBalance() {
-  if (!Burner.publicKeyB58) return;
-  try {
-    const bal = await rpc("getBalance", [Burner.publicKeyB58]);
-    document.getElementById("burnerBalance").textContent = "balance: " + fmtSol(BigInt(bal.value), 4) + " SOL";
-    document.getElementById("withdrawBtn").disabled = BigInt(bal.value) === 0n;
-  } catch (e) { /* transient RPC hiccup, ignore */ }
+// A balance read straight after a confirmed transfer can still come back stale: the RPC node
+// that answers the read is not necessarily the one that saw the transfer, and "confirmed" only
+// guarantees the cluster agrees, not that this particular node has caught up. Reading once and
+// showing 0.0000 makes a funded burner look empty, which then makes the next click look broken.
+// So the post-funding call polls until the balance actually appears.
+async function refreshBurnerBalance(retries) {
+  if (!Burner.publicKeyB58) return 0n;
+  const attempts = Math.max(1, retries || 1);
+  let last = 0n;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const bal = await rpc("getBalance", [Burner.publicKeyB58, { commitment: "confirmed" }]);
+      last = BigInt(bal.value);
+      document.getElementById("burnerBalance").textContent = "balance: " + fmtSol(last, 4) + " SOL";
+      document.getElementById("withdrawBtn").disabled = last === 0n;
+      if (last > 0n) return last;
+    } catch (e) { /* transient RPC hiccup, keep trying */ }
+    if (i < attempts - 1) await new Promise((r) => setTimeout(r, 1200));
+  }
+  return last;
 }
 
 let pollFailCount = 0;
