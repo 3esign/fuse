@@ -625,7 +625,7 @@ async function fundBurner() {
   const lamports = BigInt(Math.round(sol * 1e9));
 
   try {
-    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value);
+    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]).then((r) => r.value);
     const ix = systemTransferIx(Wallet.publicKeyB58, Burner.publicKeyB58, lamports);
     const { message, numRequiredSignatures } = MiniSol.compileMessage({ payerPubkey: Wallet.publicKeyB58, instructions: [ix], recentBlockhash: blockhash });
     // Phantom's message-based signAndSendTransaction request expects a full transaction WIRE
@@ -670,7 +670,7 @@ async function withdrawBurner() {
     const FEE_BUFFER = 6000n; // keep a little for the transfer's own fee
     if (balLamports <= FEE_BUFFER) { showMsg("walletMsg", "err", "Burner has nothing to withdraw."); return; }
     const sendLamports = balLamports - FEE_BUFFER;
-    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value);
+    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]).then((r) => r.value);
     const ix = systemTransferIx(Burner.publicKeyB58, Wallet.publicKeyB58, sendLamports);
     const { message } = MiniSol.compileMessage({ payerPubkey: Burner.publicKeyB58, instructions: [ix], recentBlockhash: blockhash });
     const sig = await Burner.sign(message);
@@ -774,15 +774,41 @@ async function confirmSignature(signature, tries) {
   throw new Error("Timed out waiting for confirmation (it may still land — check the explorer link).");
 }
 
+// Public RPC endpoints are load balancers in front of many nodes, and the node that answers a
+// read is not necessarily the one that answers the send a moment later. A blockhash taken at
+// "confirmed" can therefore be unknown to the sending node, which fails preflight with
+// "Blockhash not found" even though the transaction itself is perfectly valid. Two defences:
+// take the blockhash at FINALIZED commitment, which every node in the pool has already seen,
+// and rebuild-resign-resend if the race still happens. The burner signs locally with no popup,
+// so a retry costs the player nothing but a few hundred milliseconds.
+async function sendBurnerTx(instructions) {
+  let lastErr = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "finalized" }]).then((r) => r.value);
+    const { message } = MiniSol.compileMessage({
+      payerPubkey: Burner.publicKeyB58,
+      instructions: budgetIxs().concat(instructions),
+      recentBlockhash: blockhash,
+    });
+    const sig = await Burner.sign(message);
+    const wire = MiniSol.serializeTransaction({ message, signatures: [sig] });
+    try {
+      return await rpc("sendTransaction", [bytesToBase64(wire), { encoding: "base64", skipPreflight: false }]);
+    } catch (e) {
+      lastErr = e;
+      if (!/blockhash not found/i.test(String(e.message || e))) throw e;
+      await new Promise((r) => setTimeout(r, 800));
+    }
+  }
+  throw lastErr;
+}
+
 async function doClick() {
   const btn = document.getElementById("clickBtn");
   btn.disabled = true;
   try {
     if (!Wallet.publicKeyB58) throw new Error("connect Phantom first");
-    const [{ blockhash }, fuseInfo] = await Promise.all([
-      rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value),
-      rpc("getAccountInfo", [CONFIG.FUSE_PDA, { encoding: "base64" }]).then((r) => r.value),
-    ]);
+    const fuseInfo = await rpc("getAccountInfo", [CONFIG.FUSE_PDA, { encoding: "base64" }]).then((r) => r.value);
     const state = decodeFuseState(base64ToBytes(fuseInfo.data[0]));
     const nowSec = BigInt(Math.floor(Date.now() / 1000));
     const expired = nowSec > state.deadline;
@@ -820,10 +846,7 @@ async function doClick() {
       beneficiaryB58: Wallet.publicKeyB58,
       prevHolderB58: prevHolderB58,
     });
-    const { message } = MiniSol.compileMessage({ payerPubkey: Burner.publicKeyB58, instructions: budgetIxs().concat([ix]), recentBlockhash: blockhash });
-    const sig = await Burner.sign(message);
-    const wire = MiniSol.serializeTransaction({ message, signatures: [sig] });
-    const signature = await rpc("sendTransaction", [bytesToBase64(wire), { encoding: "base64", skipPreflight: false }]);
+    const signature = await sendBurnerTx([ix]);
     addReceipt("click", (expired && prevHolderB58) ? "Clicked (auto-settled previous round)" : "Clicked", signature);
     showMsg("clickMsg", "ok", "Click sent: " + signature.slice(0, 12) + "…");
     confirmSignature(signature).then(
@@ -846,12 +869,8 @@ async function doSettle() {
     const nowSec = BigInt(Math.floor(Date.now() / 1000));
     if (nowSec <= state.deadline) throw new Error("fuse hasn't burned out yet");
     if (state.clicks === 0n) throw new Error("no clicks this round — it will just roll on the next click, nothing to settle");
-    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value);
     const ix = settleIx({ crankerB58: Burner.publicKeyB58, fuseB58: CONFIG.FUSE_PDA, holderB58: state.holder });
-    const { message } = MiniSol.compileMessage({ payerPubkey: Burner.publicKeyB58, instructions: budgetIxs().concat([ix]), recentBlockhash: blockhash });
-    const sig = await Burner.sign(message);
-    const wire = MiniSol.serializeTransaction({ message, signatures: [sig] });
-    const signature = await rpc("sendTransaction", [bytesToBase64(wire), { encoding: "base64", skipPreflight: false }]);
+    const signature = await sendBurnerTx([ix]);
     addReceipt("win", "Cranked settle (1% tip to burner)", signature);
     await confirmSignature(signature);
     refreshState();
