@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>FUSE — last click before it burns out takes the pot</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0a0908;
+    --panel: #15120f;
+    --panel2: #1d1814;
+    --line: #332a20;
+    --ember: #ff6a2b;
+    --ember2: #ffb347;
+    --flame: #ffd23f;
+    --text: #f2e9dd;
+    --dim: #9a8f80;
+    --good: #6ee7a0;
+    --bad: #ff5d5d;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  body { min-height: 100vh; display: flex; flex-direction: column; align-items: center; padding: 24px 16px 64px; }
+  .banner {
+    width: 100%; max-width: 720px; background: #3a2a12; border: 1px solid #6b4a1a; color: #ffcf8a;
+    border-radius: 10px; padding: 10px 14px; font-size: 13px; margin-bottom: 18px; text-align: center;
+  }
+  h1 {
+    font-size: 15px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--dim);
+    margin: 0 0 4px; font-weight: 600;
+  }
+  .title-row { width: 100%; max-width: 720px; display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 18px; }
+  .logo { font-size: 22px; font-weight: 800; letter-spacing: 0.02em; color: var(--ember2); }
+  .logo span { color: var(--flame); }
+
+  .card {
+    width: 100%; max-width: 720px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 16px; padding: 22px; margin-bottom: 16px;
+  }
+
+  .fuse-wrap { position: relative; height: 46px; border-radius: 999px; background: #0d0b09; border: 1px solid var(--line); overflow: hidden; margin: 6px 0 10px; }
+  .fuse-fill {
+    position: absolute; inset: 0; width: 100%; transform-origin: left center;
+    background: linear-gradient(90deg, #7a1a00, var(--ember) 55%, var(--flame));
+    transition: transform 0.9s linear;
+  }
+  .fuse-spark {
+    position: absolute; top: 50%; width: 22px; height: 22px; border-radius: 50%;
+    background: radial-gradient(circle, #fff7d6, var(--flame) 40%, var(--ember) 70%, transparent 75%);
+    transform: translate(-50%, -50%); filter: drop-shadow(0 0 8px var(--ember));
+    transition: left 0.9s linear;
+  }
+  .fuse-label {
+    position: relative; z-index: 2; display: flex; justify-content: space-between; align-items: center;
+    height: 100%; padding: 0 16px; font-variant-numeric: tabular-nums; font-weight: 700; font-size: 15px;
+    mix-blend-mode: difference;
+  }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 14px; margin-top: 16px; }
+  .stat { background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  .stat .k { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin-bottom: 6px; }
+  .stat .v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat .v.you { color: var(--good); }
+  .stat .sub { font-size: 12px; color: var(--dim); margin-top: 2px; }
+
+  button, a.btn-secondary {
+    font-family: inherit; font-size: 15px; font-weight: 700; border-radius: 10px; border: none;
+    padding: 12px 18px; cursor: pointer; transition: transform 0.05s ease, opacity 0.15s ease;
+  }
+  /* the Buy link is an <a>, not a <button>, so it needs the button box explicitly */
+  a.btn-secondary { display: inline-block; text-decoration: none; white-space: nowrap; }
+  button:active { transform: scale(0.98); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .btn-primary { background: linear-gradient(180deg, var(--ember2), var(--ember)); color: #180a00; width: 100%; font-size: 17px; padding: 16px; }
+  .btn-secondary { background: var(--panel2); border: 1px solid var(--line); color: var(--text); }
+  .btn-danger { background: #3a1414; border: 1px solid #6b2020; color: #ffb3b3; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 8px 0; }
+  /* addresses are long unbroken strings; without this they run off the right edge on phones */
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px;
+          overflow-wrap: anywhere; word-break: break-all; }
+  .dim { color: var(--dim); }
+  input[type=text], input[type=number] {
+    background: var(--panel2); border: 1px solid var(--line); color: var(--text); border-radius: 8px;
+    padding: 10px 12px; font-family: inherit; font-size: 14px; width: 100%;
+  }
+  a { color: var(--ember2); }
+
+  .pill { display: inline-flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 12px; font-size: 12px; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--dim); }
+  .dot.on { background: var(--good); box-shadow: 0 0 6px var(--good); }
+
+  .receipts { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+  .receipt { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 8px 10px;
+    background: var(--panel2); border-radius: 8px; border: 1px solid var(--line); }
+  .receipt .tag { font-weight: 700; }
+  .receipt .tag.win { color: var(--good); }
+  .receipt .tag.click { color: var(--ember2); }
+  .receipt .tag.err { color: var(--bad); }
+
+  .section-title { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--dim); margin: 0 0 10px; }
+  .msg { font-size: 13px; padding: 10px 12px; border-radius: 8px; margin-top: 10px; }
+  .msg.err { background: #3a1414; color: #ffb3b3; border: 1px solid #6b2020; }
+  .msg.ok { background: #123a1e; color: #a9f0c4; border: 1px solid #1f6b3a; }
+  .footer { max-width: 720px; width: 100%; text-align: center; color: var(--dim); font-size: 12px; margin-top: 20px; line-height: 1.6; }
+  .footer code { color: var(--dim); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+
+<div class="banner" id="networkBanner" style="display:none;"></div>
+
+<div class="title-row">
+  <div class="logo">FUSE<span>.</span></div>
+  <div class="pill"><span class="dot" id="liveDot"></span><span id="liveLabel">connecting…</span></div>
+</div>
+
+<div class="card">
+  <div class="section-title">the fuse</div>
+  <div class="fuse-wrap">
+    <div class="fuse-fill" id="fuseFill"></div>
+    <div class="fuse-spark" id="fuseSpark"></div>
+    <div class="fuse-label">
+      <span id="fuseTimeLeft">—</span>
+      <span id="fuseState" class="dim">loading…</span>
+    </div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat">
+      <div class="k">pot</div>
+      <div class="v" id="statPot">—</div>
+      <div class="sub">SOL, winner takes 90%</div>
+    </div>
+    <div class="stat">
+      <div class="k">next click</div>
+      <div class="v" id="statPrice">—</div>
+      <div class="sub" id="statPriceSub">SOL</div>
+    </div>
+    <div class="stat">
+      <div class="k">holder</div>
+      <div class="v" id="statHolder">—</div>
+      <div class="sub" id="statHolderSub">&nbsp;</div>
+    </div>
+    <div class="stat">
+      <div class="k">round</div>
+      <div class="v" id="statRound">—</div>
+      <div class="sub" id="statClicks">— clicks</div>
+    </div>
+  </div>
+
+  <div style="margin-top:18px;">
+    <button class="btn-primary" id="clickBtn" disabled>Connect a wallet to play</button>
+  </div>
+  <div id="clickMsg"></div>
+</div>
+
+<div class="card" id="tokenomicsCard">
+  <div class="section-title">how this pot is funded</div>
+  <div class="dim" style="font-size:13px; line-height:1.6;">
+    Every click pays into this pot directly — 100% of the click price, no house cut. On top of that,
+    <b>$FUSE</b> trading fees feed the pot too: a fixed share of every pump.fun creator fee is swept in
+    automatically, on top of whatever players are putting in by clicking.
+  </div>
+  <div class="stat-grid" style="margin-top:14px;">
+    <div class="stat">
+      <div class="k">to the pot</div>
+      <div class="v">33.67%</div>
+      <div class="sub">of every $FUSE creator fee</div>
+    </div>
+    <div class="stat">
+      <div class="k">to the creator</div>
+      <div class="v">66.33%</div>
+      <div class="sub">locked at launch, irreversible</div>
+    </div>
+  </div>
+  <div class="dim" style="font-size:12px; margin-top:12px; line-height:1.6;">
+    That split is set once via pump.fun's fee-sharing config and can never be changed afterward — not by
+    anyone, not even the token's creator. Sweeping accumulated fees into the pot is permissionless: anyone
+    can trigger it, there's no gatekeeper and nothing to wait on.
+  </div>
+  <div class="row" style="margin-top:12px;">
+    <div>
+      <div class="dim" style="font-size:12px;">$FUSE token</div>
+      <div class="mono" id="tokenCaDisplay">not launched yet</div>
+    </div>
+    <a id="tokenBuyLink" class="btn-secondary" style="text-decoration:none; display:none; text-align:center;" target="_blank" rel="noopener">Buy $FUSE</a>
+  </div>
+</div>
+
+<div class="card" id="walletCard">
+  <div class="section-title">your wallet</div>
+
+  <div class="row">
+    <div>
+      <div class="dim" style="font-size:12px;">beneficiary (Phantom)</div>
+      <div class="mono" id="beneficiaryAddr">not connected</div>
+    </div>
+    <button class="btn-secondary" id="connectBtn">Connect Phantom</button>
+  </div>
+
+  <div class="row">
+    <div>
+      <div class="dim" style="font-size:12px;">burner (signs every click, no popups)</div>
+      <div class="mono" id="burnerAddr">generating…</div>
+      <div class="dim" id="burnerBalance" style="font-size:12px; margin-top:2px;">balance: —</div>
+    </div>
+  </div>
+
+  <div class="grid2" style="margin-top:10px;">
+    <div>
+      <input type="number" id="fundAmount" value="0.05" step="0.01" min="0" />
+      <button class="btn-secondary" id="fundBtn" style="width:100%; margin-top:8px;" disabled>Fund burner</button>
+    </div>
+    <div>
+      <div class="dim" style="font-size:12px; margin-bottom:8px;">sweep whatever's left in the burner back to your Phantom wallet</div>
+      <button class="btn-secondary" id="withdrawBtn" style="width:100%;" disabled>Withdraw burner</button>
+    </div>
+  </div>
+
+  <div class="dim" style="font-size:12px; margin-top:12px;">
+    The burner is a throwaway Ed25519 keypair generated in your browser (WebCrypto) and kept in this
+    browser's local storage. It never touches Phantom or leaves this device. Only fund it what you're
+    willing to click away — loss is bounded by its balance. Winnings always go to your <b>beneficiary</b>
+    (Phantom) address, never to the burner.
+  </div>
+  <div id="walletMsg"></div>
+</div>
+
+<div class="card">
+  <div class="row" style="margin-bottom:6px;">
+    <div class="section-title" style="margin:0;">receipts</div>
+    <button class="btn-secondary" id="settleBtn" style="font-size:13px; padding:8px 12px;" disabled>Crank settle (+1% tip)</button>
+  </div>
+  <div class="receipts" id="receipts">
+    <div class="dim" style="font-size:13px;">Nothing yet. Fund the burner and click the fuse.</div>
+  </div>
+</div>
+
+<div class="footer">
+  Program <code id="programIdFooter">—</code> ·
+  Fuse account <code id="fuseAddrFooter">—</code><br/>
+  Zero-dependency page: no bundler, no wallet-adapter, no @solana/web3.js. Transactions are built and
+  signed by hand-rolled Ed25519 (WebCrypto) + a minimal legacy-transaction serializer, verified
+  byte-for-byte against @solana/web3.js before shipping.
+</div>
+
+<script>
+"use strict";
+
+// ============================================================================
+// Config — THE ONLY BLOCK TO EDIT when moving from devnet to mainnet.
+// All five values below must change together. Getting any one of them wrong
+// points the page at the wrong chain or the wrong account, so change them as a
+// set, never one at a time:
+//   RPC_URL              -> a mainnet RPC endpoint
+//   PROGRAM_ID           -> the mainnet FUSE program id (a NEW address; the
+//                           devnet id below will not exist on mainnet)
+//   FUSE_PDA             -> the mainnet fuse PDA (derived from the mainnet
+//                           PROGRAM_ID; the devnet PDA below is a different key)
+//   IS_DEVNET            -> false (this drives the warning banner at the top)
+//   EXPLORER_CLUSTER_QS  -> "" (explorer defaults to mainnet-beta)
+// ============================================================================
+const CONFIG = {
+  RPC_URL: "https://api.devnet.solana.com",
+  PROGRAM_ID: "9KJyVDDvDMNbYDgpvCMJwWMWojidcETEkJ6i3APBBoLj",
+  FUSE_PDA: "FjZseExfY2VLaLF7GaQkfByX1ZCbGShritJNvbWyHw5q", // devnet fuse PDA, bump 255
+  IS_DEVNET: true,
+  EXPLORER_CLUSTER_QS: "?cluster=devnet",
+  // Priority fee for the burner-signed transactions (click / settle / withdraw).
+  // FUSE is a race: the last click before the fuse dies wins, so a click that sits in the
+  // mempool during congestion is a click that loses to anyone paying for priority. Measured
+  // on devnet: click = 5,349 CU, settle = 3,251 CU, so a 12,000 CU limit is generous headroom
+  // while still being cheap to schedule. At 100,000 microLamports/CU the priority fee works
+  // out to ~1,200 lamports — about 0.06% of a 0.002 SOL click, i.e. negligible insurance.
+  // Raise PRIORITY_MICROLAMPORTS on a busy launch day; set it to 0 to disable priority fees.
+  COMPUTE_UNIT_LIMIT: 12000,
+  PRIORITY_MICROLAMPORTS: 100000,
+  // Paste the $FUSE mint address here once the token is live on pump.fun. Leave empty until then —
+  // the "how this pot is funded" card shows "not launched yet" and hides the Buy link automatically.
+  TOKEN_CA: "",
+};
+
+// ============================================================================
+// mini-sol: base58 + compact-u16 + legacy transaction message builder.
+// Verified byte-for-byte / structurally-equivalent against @solana/web3.js
+// (see build notes). No external requests, no bundler.
+// ============================================================================
+const MiniSol = (function () {
+  const B58_ALPHABET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+  const B58_MAP = {};
+  for (let i = 0; i < B58_ALPHABET.length; i++) B58_MAP[B58_ALPHABET[i]] = i;
+
+  function b58encode(bytes) {
+    if (bytes.length === 0) return "";
+    let zeros = 0;
+    while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+    let digits = [];
+    for (let i = zeros; i < bytes.length; i++) {
+      let carry = bytes[i];
+      for (let j = 0; j < digits.length; j++) {
+        carry += digits[j] << 8;
+        digits[j] = carry % 58;
+        carry = (carry / 58) | 0;
+      }
+      while (carry > 0) {
+        digits.push(carry % 58);
+        carry = (carry / 58) | 0;
+      }
+    }
+    if (digits.length === 0 && zeros < bytes.length) digits = [0];
+    let out = "";
+    for (let i = 0; i < zeros; i++) out += "1";
+    for (let i = digits.length - 1; i >= 0; i--) out += B58_ALPHABET[digits[i]];
+    return out;
+  }
+
+  function b58decode(str) {
+    if (str.length === 0) return new Uint8Array(0);
+    let zeros = 0;
+    while (zeros < str.length && str[zeros] === "1") zeros++;
+    let bytes = [];
+    for (let i = zeros; i < str.length; i++) {
+      const value = B58_MAP[str[i]];
+      if (value === undefined) throw new Error("Invalid base58 character: " + str[i]);
+      let carry = value;
+      for (let j = 0; j < bytes.length; j++) {
+        carry += bytes[j] * 58;
+        bytes[j] = carry & 0xff;
+        carry >>= 8;
+      }
+      while (carry > 0) {
+        bytes.push(carry & 0xff);
+        carry >>= 8;
+      }
+    }
+    if (bytes.length === 0 && zeros < str.length) bytes = [0];
+    const out = new Uint8Array(zeros + bytes.length);
+    for (let i = 0; i < bytes.length; i++) out[zeros + i] = bytes[bytes.length - 1 - i];
+    return out;
+  }
+
+  function encodeCompactU16(n) {
+    const out = [];
+    while (true) {
+      let byte = n & 0x7f;
+      n >>>= 7;
+      if (n === 0) { out.push(byte); break; }
+      out.push(byte | 0x80);
+    }
+    return out;
+  }
+
+  function concatBytes(arrays) {
+    let len = 0;
+    for (const a of arrays) len += a.length;
+    const out = new Uint8Array(len);
+    let off = 0;
+    for (const a of arrays) { out.set(a, off); off += a.length; }
+    return out;
+  }
+
+  function toBytes(arr) { return arr instanceof Uint8Array ? arr : new Uint8Array(arr); }
+
+  const SYSTEM_PROGRAM_ID = "11111111111111111111111111111111";
+
+  function compileMessage({ payerPubkey, instructions, recentBlockhash }) {
+    const metaMap = new Map();
+    function upsert(pubkey, isSigner, isWritable) {
+      const existing = metaMap.get(pubkey);
+      if (!existing) metaMap.set(pubkey, { isSigner: !!isSigner, isWritable: !!isWritable });
+      else { existing.isSigner = existing.isSigner || isSigner; existing.isWritable = existing.isWritable || isWritable; }
+    }
+    upsert(payerPubkey, true, true);
+    for (const ix of instructions) {
+      for (const k of ix.keys) upsert(k.pubkey, k.isSigner, k.isWritable);
+      upsert(ix.programId, false, false);
+    }
+    const all = Array.from(metaMap.entries()).map(([pubkey, meta]) => ({ pubkey, ...meta }));
+    all.sort((a, b) => {
+      if (a.pubkey === payerPubkey) return -1;
+      if (b.pubkey === payerPubkey) return 1;
+      const aRank = (a.isSigner ? 0 : 2) + (a.isWritable ? 0 : 1);
+      const bRank = (b.isSigner ? 0 : 2) + (b.isWritable ? 0 : 1);
+      return aRank - bRank;
+    });
+    const numRequiredSignatures = all.filter((a) => a.isSigner).length;
+    const numReadonlySignedAccounts = all.filter((a) => a.isSigner && !a.isWritable).length;
+    const numReadonlyUnsignedAccounts = all.filter((a) => !a.isSigner && !a.isWritable).length;
+    const indexOf = new Map(all.map((a, i) => [a.pubkey, i]));
+    const accountKeysBytes = all.map((a) => b58decode(a.pubkey));
+    const compiledInstructions = instructions.map((ix) => ({
+      programIdIndex: indexOf.get(ix.programId),
+      accounts: ix.keys.map((k) => indexOf.get(k.pubkey)),
+      data: toBytes(ix.data),
+    }));
+    const header = new Uint8Array([numRequiredSignatures, numReadonlySignedAccounts, numReadonlyUnsignedAccounts]);
+    const accountKeysSection = concatBytes([new Uint8Array(encodeCompactU16(all.length)), ...accountKeysBytes]);
+    const blockhashBytes = b58decode(recentBlockhash);
+    const instructionsSection = concatBytes([
+      new Uint8Array(encodeCompactU16(compiledInstructions.length)),
+      ...compiledInstructions.map((ci) => concatBytes([
+        new Uint8Array([ci.programIdIndex]),
+        new Uint8Array(encodeCompactU16(ci.accounts.length)),
+        new Uint8Array(ci.accounts),
+        new Uint8Array(encodeCompactU16(ci.data.length)),
+        ci.data,
+      ])),
+    ]);
+    const message = concatBytes([header, accountKeysSection, blockhashBytes, instructionsSection]);
+    return { message, accountKeys: all.map((a) => a.pubkey), numRequiredSignatures };
+  }
+
+  function serializeTransaction({ message, signatures }) {
+    const sigSection = concatBytes([new Uint8Array(encodeCompactU16(signatures.length)), ...signatures.map(toBytes)]);
+    return concatBytes([sigSection, message]);
+  }
+
+  return { b58encode, b58decode, encodeCompactU16, concatBytes, compileMessage, serializeTransaction, SYSTEM_PROGRAM_ID };
+})();
+
+// ============================================================================
+// Tiny RPC helper
+// ============================================================================
+let rpcId = 1;
+async function rpc(method, params) {
+  const res = await fetch(CONFIG.RPC_URL, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: rpcId++, method, params }),
+  });
+  const json = await res.json();
+  if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+  return json.result;
+}
+
+function bytesToBase64(bytes) {
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// ============================================================================
+// FUSE account layout (96 bytes, all little-endian) — mirrors the on-chain program.
+// ============================================================================
+const FUSE_LEN = 96;
+function readU64LE(d, off) {
+  let v = 0n;
+  for (let i = 7; i >= 0; i--) v = (v << 8n) | BigInt(d[off + i]);
+  return v;
+}
+function readI64LE(d, off) {
+  let v = readU64LE(d, off);
+  if (v & (1n << 63n)) v -= 1n << 64n;
+  return v;
+}
+function decodeFuseState(bytes) {
+  if (bytes.length !== FUSE_LEN) throw new Error("unexpected fuse account length " + bytes.length);
+  const holderBytes = bytes.slice(32, 64);
+  const isDefaultHolder = holderBytes.every((b) => b === 0);
+  return {
+    roundId: readU64LE(bytes, 0),
+    clicks: readU64LE(bytes, 8),
+    price: readU64LE(bytes, 16),
+    deadline: readI64LE(bytes, 24),
+    holder: isDefaultHolder ? null : MiniSol.b58encode(holderBytes),
+    rentFloor: readU64LE(bytes, 64),
+    roundStarted: readI64LE(bytes, 72),
+    bump: bytes[80],
+  };
+}
+
+function lamportsToSol(lamports) {
+  return Number(lamports) / 1e9;
+}
+function fmtSol(lamports, digits) {
+  return lamportsToSol(lamports).toFixed(digits === undefined ? 4 : digits);
+}
+function short(pubkey) {
+  if (!pubkey) return "—";
+  return pubkey.slice(0, 4) + "…" + pubkey.slice(-4);
+}
+
+// ============================================================================
+// Burner wallet: WebCrypto Ed25519 keypair, persisted in localStorage.
+// ============================================================================
+const Burner = {
+  keyPair: null,
+  publicKeyB58: null,
+
+  async load() {
+    let stored = null;
+    try { stored = localStorage.getItem("fuse_burner_pkcs8_b64"); } catch (e) { /* storage unavailable */ }
+
+    if (stored) {
+      try {
+        const pkcs8 = base64ToBytes(stored);
+        const privateKey = await crypto.subtle.importKey("pkcs8", pkcs8, { name: "Ed25519" }, true, ["sign"]);
+        const jwk = await crypto.subtle.exportKey("jwk", privateKey);
+        const publicKey = await crypto.subtle.importKey("jwk", { kty: "OKP", crv: "Ed25519", x: jwk.x }, { name: "Ed25519" }, true, ["verify"]);
+        this.keyPair = { privateKey, publicKey };
+        const rawPub = new Uint8Array(await crypto.subtle.exportKey("raw", publicKey));
+        this.publicKeyB58 = MiniSol.b58encode(rawPub);
+        return;
+      } catch (e) {
+        console.warn("Failed to restore burner key, generating a new one:", e);
+      }
+    }
+
+    const kp = await crypto.subtle.generateKey({ name: "Ed25519" }, true, ["sign", "verify"]);
+    this.keyPair = kp;
+    const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", kp.privateKey));
+    try { localStorage.setItem("fuse_burner_pkcs8_b64", bytesToBase64(pkcs8)); } catch (e) { /* storage unavailable */ }
+    const rawPub = new Uint8Array(await crypto.subtle.exportKey("raw", kp.publicKey));
+    this.publicKeyB58 = MiniSol.b58encode(rawPub);
+  },
+
+  async sign(messageBytes) {
+    const sig = await crypto.subtle.sign("Ed25519", this.keyPair.privateKey, messageBytes);
+    return new Uint8Array(sig);
+  },
+};
+
+// ============================================================================
+// Wallet (Phantom) — beneficiary connection + funding the burner.
+// ============================================================================
+const Wallet = { publicKeyB58: null, provider: null };
+
+function getPhantomProvider() {
+  const anyWindow = window;
+  if (anyWindow.phantom && anyWindow.phantom.solana && anyWindow.phantom.solana.isPhantom) return anyWindow.phantom.solana;
+  if (anyWindow.solana && anyWindow.solana.isPhantom) return anyWindow.solana;
+  return null;
+}
+
+async function connectWallet() {
+  const provider = getPhantomProvider();
+  if (!provider) {
+    showMsg("walletMsg", "err", "Phantom not found. Install the Phantom browser extension, then reload this page.");
+    return;
+  }
+  try {
+    const resp = await provider.connect();
+    Wallet.provider = provider;
+    Wallet.publicKeyB58 = resp.publicKey.toString();
+    document.getElementById("beneficiaryAddr").textContent = Wallet.publicKeyB58;
+    document.getElementById("connectBtn").textContent = "Connected";
+    document.getElementById("connectBtn").disabled = true;
+    document.getElementById("fundBtn").disabled = false;
+    showMsg("walletMsg", "ok", "Connected. You can now fund the burner and start clicking.");
+    refreshClickButton();
+  } catch (e) {
+    showMsg("walletMsg", "err", "Connection rejected or failed: " + e.message);
+  }
+}
+
+async function fundBurner() {
+  if (!Wallet.provider || !Wallet.publicKeyB58) { showMsg("walletMsg", "err", "Connect Phantom first."); return; }
+  const amountInput = document.getElementById("fundAmount");
+  const sol = parseFloat(amountInput.value);
+  if (!(sol > 0)) { showMsg("walletMsg", "err", "Enter an amount greater than 0."); return; }
+  const lamports = BigInt(Math.round(sol * 1e9));
+
+  try {
+    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value);
+    const ix = systemTransferIx(Wallet.publicKeyB58, Burner.publicKeyB58, lamports);
+    const { message, numRequiredSignatures } = MiniSol.compileMessage({ payerPubkey: Wallet.publicKeyB58, instructions: [ix], recentBlockhash: blockhash });
+    // Phantom's message-based signAndSendTransaction request expects a full transaction WIRE
+    // (compact-u16 signature count + one 64-byte placeholder per required signer, then the
+    // message bytes) — not the bare message. Passing the bare message throws "Reached end of
+    // buffer unexpectedly" inside Phantom. Reuse the same serializeTransaction helper the
+    // burner-signed paths use, with all-zero placeholder signatures for Phantom to fill in.
+    const placeholderSigs = Array.from({ length: numRequiredSignatures }, () => new Uint8Array(64));
+    const wire = MiniSol.serializeTransaction({ message, signatures: placeholderSigs });
+    const wireB58 = MiniSol.b58encode(wire);
+    const result = await Wallet.provider.request({ method: "signAndSendTransaction", params: { message: wireB58 } });
+    showMsg("walletMsg", "ok", "Funding sent: " + result.signature.slice(0, 12) + "… waiting for confirmation.");
+    addReceipt("fund", "Funded burner with " + sol + " SOL", result.signature);
+    try {
+      await confirmSignature(result.signature);
+    } catch (confirmErr) {
+      // Phantom broadcasts through ITS OWN network setting, which the page cannot read and
+      // cannot control. If that setting doesn't match the network this page is pointed at,
+      // Phantom still returns a signature but the transaction is built against the wrong
+      // chain's blockhash and never lands anywhere — no error, just silence. That is by far
+      // the most common cause of a fund that "sent" but never confirms, so say so plainly
+      // instead of leaving the user staring at a generic timeout.
+      throw new Error(
+        (confirmErr.message || confirmErr) +
+        " — if this keeps happening, check that Phantom itself is set to " +
+        (CONFIG.IS_DEVNET ? "Devnet" : "Mainnet") +
+        " (Phantom → Settings → Developer Settings). Phantom sends on the network IT is set to, " +
+        "not the one this page uses, and a mismatch fails silently."
+      );
+    }
+    showMsg("walletMsg", "ok", "Burner funded.");
+    refreshBurnerBalance();
+  } catch (e) {
+    showMsg("walletMsg", "err", "Funding failed: " + (e.message || e));
+  }
+}
+
+async function withdrawBurner() {
+  if (!Wallet.publicKeyB58) { showMsg("walletMsg", "err", "Connect Phantom first so we know where to send it."); return; }
+  try {
+    const balLamports = BigInt((await rpc("getBalance", [Burner.publicKeyB58])).value);
+    const FEE_BUFFER = 6000n; // keep a little for the transfer's own fee
+    if (balLamports <= FEE_BUFFER) { showMsg("walletMsg", "err", "Burner has nothing to withdraw."); return; }
+    const sendLamports = balLamports - FEE_BUFFER;
+    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value);
+    const ix = systemTransferIx(Burner.publicKeyB58, Wallet.publicKeyB58, sendLamports);
+    const { message } = MiniSol.compileMessage({ payerPubkey: Burner.publicKeyB58, instructions: [ix], recentBlockhash: blockhash });
+    const sig = await Burner.sign(message);
+    const wire = MiniSol.serializeTransaction({ message, signatures: [sig] });
+    const signature = await rpc("sendTransaction", [bytesToBase64(wire), { encoding: "base64", skipPreflight: false }]);
+    addReceipt("withdraw", "Withdrew " + fmtSol(sendLamports) + " SOL to your wallet", signature);
+    await confirmSignature(signature);
+    showMsg("walletMsg", "ok", "Withdrawn to your Phantom wallet.");
+    refreshBurnerBalance();
+  } catch (e) {
+    showMsg("walletMsg", "err", "Withdraw failed: " + (e.message || e));
+  }
+}
+
+function systemTransferIx(fromB58, toB58, lamports) {
+  const data = new Uint8Array(12);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 2, true); // SystemProgram Transfer discriminator
+  view.setBigUint64(4, lamports, true);
+  return {
+    programId: MiniSol.SYSTEM_PROGRAM_ID,
+    keys: [
+      { pubkey: fromB58, isSigner: true, isWritable: true },
+      { pubkey: toB58, isSigner: false, isWritable: true },
+    ],
+    data,
+  };
+}
+
+// ============================================================================
+// FUSE program instructions
+// ============================================================================
+let FUSE_PDA_B58 = null;
+
+async function deriveFusePda() {
+  // We don't have a general-purpose PDA-derivation primitive (needs the same sha256-based
+  // "off-curve" search Solana uses); instead we ask the RPC-independent, already-known PDA
+  // straight from chain state we recorded at deploy time. This keeps the page's crypto surface
+  // to exactly one primitive (Ed25519 sign) instead of re-implementing PDA derivation.
+  return CONFIG.FUSE_PDA;
+}
+
+// ComputeBudget program: sets this transaction's CU ceiling and its priority-fee bid.
+// Both instructions take no accounts; the data is a discriminator + a little-endian integer.
+const COMPUTE_BUDGET_PROGRAM_ID = "ComputeBudget111111111111111111111111111111";
+
+function computeUnitLimitIx(units) {
+  const data = new Uint8Array(5);
+  data[0] = 2; // SetComputeUnitLimit
+  new DataView(data.buffer).setUint32(1, units, true);
+  return { programId: COMPUTE_BUDGET_PROGRAM_ID, keys: [], data };
+}
+
+function computeUnitPriceIx(microLamports) {
+  const data = new Uint8Array(9);
+  data[0] = 3; // SetComputeUnitPrice
+  new DataView(data.buffer).setBigUint64(1, BigInt(microLamports), true);
+  return { programId: COMPUTE_BUDGET_PROGRAM_ID, keys: [], data };
+}
+
+// Prepended to every burner-signed transaction. Returns [] when priority fees are disabled.
+function budgetIxs() {
+  if (!CONFIG.PRIORITY_MICROLAMPORTS) return [];
+  return [computeUnitLimitIx(CONFIG.COMPUTE_UNIT_LIMIT), computeUnitPriceIx(CONFIG.PRIORITY_MICROLAMPORTS)];
+}
+
+function clickIx({ payerB58, fuseB58, beneficiaryB58, prevHolderB58 }) {
+  const keys = [
+    { pubkey: payerB58, isSigner: true, isWritable: true },
+    { pubkey: fuseB58, isSigner: false, isWritable: true },
+    { pubkey: beneficiaryB58, isSigner: false, isWritable: false },
+    { pubkey: MiniSol.SYSTEM_PROGRAM_ID, isSigner: false, isWritable: false },
+  ];
+  if (prevHolderB58) keys.push({ pubkey: prevHolderB58, isSigner: false, isWritable: true });
+  return { programId: CONFIG.PROGRAM_ID, keys, data: new Uint8Array([1]) };
+}
+
+function settleIx({ crankerB58, fuseB58, holderB58 }) {
+  return {
+    programId: CONFIG.PROGRAM_ID,
+    keys: [
+      { pubkey: crankerB58, isSigner: true, isWritable: true },
+      { pubkey: fuseB58, isSigner: false, isWritable: true },
+      { pubkey: holderB58, isSigner: false, isWritable: true },
+    ],
+    data: new Uint8Array([2]),
+  };
+}
+
+async function confirmSignature(signature, tries) {
+  tries = tries || 30;
+  for (let i = 0; i < tries; i++) {
+    const st = await rpc("getSignatureStatuses", [[signature]]);
+    const s = st.value[0];
+    if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) {
+      if (s.err) throw new Error("Transaction failed on-chain: " + JSON.stringify(s.err));
+      return true;
+    }
+    await new Promise((r) => setTimeout(r, 800));
+  }
+  throw new Error("Timed out waiting for confirmation (it may still land — check the explorer link).");
+}
+
+async function doClick() {
+  const btn = document.getElementById("clickBtn");
+  btn.disabled = true;
+  try {
+    if (!Wallet.publicKeyB58) throw new Error("connect Phantom first");
+    const [{ blockhash }, fuseInfo] = await Promise.all([
+      rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value),
+      rpc("getAccountInfo", [CONFIG.FUSE_PDA, { encoding: "base64" }]).then((r) => r.value),
+    ]);
+    const state = decodeFuseState(base64ToBytes(fuseInfo.data[0]));
+    const nowSec = BigInt(Math.floor(Date.now() / 1000));
+    const expired = nowSec > state.deadline;
+
+    // Attach the previous holder whenever the round HAS one, not only when we believe the
+    // fuse has already burned out. Two things make the "only if expired" version fragile:
+    // this check runs on the player's own clock, and even a correct clock can be overtaken
+    // between reading state and the transaction landing. If the round expires in that gap,
+    // the program needs the previous holder to auto-settle and fails with
+    // NotEnoughAccountKeys — which would make clicks flaky exactly at round boundaries,
+    // when the game is busiest. Passing the account when it is NOT needed costs nothing:
+    // the program only ever reads it inside its expired branch and otherwise ignores it.
+    const prevHolderB58 = state.clicks > 0n && state.holder ? state.holder : null;
+
+    const ix = clickIx({
+      payerB58: Burner.publicKeyB58,
+      fuseB58: CONFIG.FUSE_PDA,
+      beneficiaryB58: Wallet.publicKeyB58,
+      prevHolderB58: prevHolderB58,
+    });
+    const { message } = MiniSol.compileMessage({ payerPubkey: Burner.publicKeyB58, instructions: budgetIxs().concat([ix]), recentBlockhash: blockhash });
+    const sig = await Burner.sign(message);
+    const wire = MiniSol.serializeTransaction({ message, signatures: [sig] });
+    const signature = await rpc("sendTransaction", [bytesToBase64(wire), { encoding: "base64", skipPreflight: false }]);
+    addReceipt("click", (expired && prevHolderB58) ? "Clicked (auto-settled previous round)" : "Clicked", signature);
+    showMsg("clickMsg", "ok", "Click sent: " + signature.slice(0, 12) + "…");
+    confirmSignature(signature).then(
+      () => { showMsg("clickMsg", "ok", "Click confirmed."); refreshState(); refreshBurnerBalance(); },
+      (e) => { showMsg("clickMsg", "err", String(e.message || e)); }
+    );
+  } catch (e) {
+    showMsg("clickMsg", "err", "Click failed: " + (e.message || e));
+  } finally {
+    setTimeout(() => refreshClickButton(), 400);
+  }
+}
+
+async function doSettle() {
+  const btn = document.getElementById("settleBtn");
+  btn.disabled = true;
+  try {
+    const fuseInfo = await rpc("getAccountInfo", [CONFIG.FUSE_PDA, { encoding: "base64" }]).then((r) => r.value);
+    const state = decodeFuseState(base64ToBytes(fuseInfo.data[0]));
+    const nowSec = BigInt(Math.floor(Date.now() / 1000));
+    if (nowSec <= state.deadline) throw new Error("fuse hasn't burned out yet");
+    if (state.clicks === 0n) throw new Error("no clicks this round — it will just roll on the next click, nothing to settle");
+    const { blockhash } = await rpc("getLatestBlockhash", [{ commitment: "confirmed" }]).then((r) => r.value);
+    const ix = settleIx({ crankerB58: Burner.publicKeyB58, fuseB58: CONFIG.FUSE_PDA, holderB58: state.holder });
+    const { message } = MiniSol.compileMessage({ payerPubkey: Burner.publicKeyB58, instructions: budgetIxs().concat([ix]), recentBlockhash: blockhash });
+    const sig = await Burner.sign(message);
+    const wire = MiniSol.serializeTransaction({ message, signatures: [sig] });
+    const signature = await rpc("sendTransaction", [bytesToBase64(wire), { encoding: "base64", skipPreflight: false }]);
+    addReceipt("win", "Cranked settle (1% tip to burner)", signature);
+    await confirmSignature(signature);
+    refreshState();
+    refreshBurnerBalance();
+  } catch (e) {
+    showMsg("clickMsg", "err", "Settle failed: " + (e.message || e));
+  } finally {
+    setTimeout(() => refreshSettleButton(), 400);
+  }
+}
+
+// ============================================================================
+// UI plumbing
+// ============================================================================
+function showMsg(elId, kind, text) {
+  const el = document.getElementById(elId);
+  el.innerHTML = '<div class="msg ' + kind + '">' + text + "</div>";
+  if (kind === "ok") setTimeout(() => { if (el.innerHTML.includes(text)) el.innerHTML = ""; }, 6000);
+}
+
+function addReceipt(kind, label, signature) {
+  const wrap = document.getElementById("receipts");
+  if (wrap.children.length === 1 && wrap.children[0].classList.contains("dim")) wrap.innerHTML = "";
+  const div = document.createElement("div");
+  div.className = "receipt";
+  const url = "https://explorer.solana.com/tx/" + signature + CONFIG.EXPLORER_CLUSTER_QS;
+  div.innerHTML =
+    '<span class="tag ' + (kind === "click" ? "click" : kind === "win" ? "win" : "") + '">' + label + "</span>" +
+    '<a href="' + url + '" target="_blank" rel="noopener" class="mono dim">' + signature.slice(0, 8) + "…↗</a>";
+  wrap.prepend(div);
+  while (wrap.children.length > 25) wrap.removeChild(wrap.lastChild);
+}
+
+let lastState = null;
+
+function renderState(state, fuseLamports) {
+  lastState = state;
+  const nowSec = Date.now() / 1000;
+  const deadline = Number(state.deadline);
+  const secsLeft = Math.max(0, Math.round(deadline - nowSec));
+  const roundStarted = Number(state.roundStarted);
+  const totalWindow = Math.max(1, deadline - roundStarted);
+  const frac = Math.max(0, Math.min(1, secsLeft / totalWindow));
+
+  document.getElementById("fuseFill").style.transform = "scaleX(" + frac + ")";
+  document.getElementById("fuseSpark").style.left = (frac * 100) + "%";
+  document.getElementById("fuseTimeLeft").textContent = secsLeft > 0 ? secsLeft + "s left" : "burned out";
+  const snipe = secsLeft > 0 && secsLeft <= 10;
+  document.getElementById("fuseState").textContent = secsLeft <= 0
+    ? "waiting for a click or a crank"
+    : (snipe ? "⚡ snipe window — clicks cost 3×" : "live");
+
+  const potLamports = fuseLamports - state.rentFloor;
+  document.getElementById("statPot").textContent = fmtSol(potLamports > 0n ? potLamports : 0n, 4);
+  const snipePrice = snipe ? state.price * 3n : state.price;
+  document.getElementById("statPrice").textContent = fmtSol(snipePrice, 4);
+  document.getElementById("statPriceSub").textContent = snipe ? "SOL (3× snipe tax)" : "SOL";
+
+  const you = Wallet.publicKeyB58;
+  const holderEl = document.getElementById("statHolder");
+  const holderSub = document.getElementById("statHolderSub");
+  if (!state.holder) {
+    holderEl.textContent = "nobody yet";
+    holderEl.classList.remove("you");
+    holderSub.textContent = "be the first click";
+  } else {
+    const isYou = you && state.holder === you;
+    holderEl.textContent = isYou ? "you" : short(state.holder);
+    holderEl.classList.toggle("you", !!isYou);
+    holderSub.textContent = isYou ? "you're winning the pot" : state.holder;
+  }
+
+  document.getElementById("statRound").textContent = "#" + state.roundId.toString();
+  document.getElementById("statClicks").textContent = state.clicks.toString() + " clicks this round";
+
+  refreshSettleButton();
+  refreshClickButton();
+}
+
+function refreshClickButton() {
+  const btn = document.getElementById("clickBtn");
+  if (!Wallet.publicKeyB58) { btn.textContent = "Connect a wallet to play"; btn.disabled = true; return; }
+  if (!Burner.publicKeyB58) { btn.textContent = "Setting up burner…"; btn.disabled = true; return; }
+  btn.disabled = false;
+  if (lastState) {
+    const nowSec = Date.now() / 1000;
+    const snipe = Number(lastState.deadline) - nowSec > 0 && Number(lastState.deadline) - nowSec <= 10;
+    const price = snipe ? lastState.price * 3n : lastState.price;
+    btn.textContent = "Click the fuse — " + fmtSol(price, 4) + " SOL";
+  } else {
+    btn.textContent = "Click the fuse";
+  }
+}
+
+function refreshSettleButton() {
+  const btn = document.getElementById("settleBtn");
+  if (!lastState || !Burner.publicKeyB58) { btn.disabled = true; return; }
+  const nowSec = Date.now() / 1000;
+  const canSettle = nowSec > Number(lastState.deadline) && lastState.clicks > 0n;
+  btn.disabled = !canSettle;
+}
+
+async function refreshBurnerBalance() {
+  if (!Burner.publicKeyB58) return;
+  try {
+    const bal = await rpc("getBalance", [Burner.publicKeyB58]);
+    document.getElementById("burnerBalance").textContent = "balance: " + fmtSol(BigInt(bal.value), 4) + " SOL";
+    document.getElementById("withdrawBtn").disabled = BigInt(bal.value) === 0n;
+  } catch (e) { /* transient RPC hiccup, ignore */ }
+}
+
+let pollFailCount = 0;
+async function refreshState() {
+  try {
+    const info = await rpc("getAccountInfo", [CONFIG.FUSE_PDA, { encoding: "base64" }]);
+    if (!info.value) {
+      document.getElementById("fuseState").textContent = "fuse not initialized yet";
+      setLive(false);
+      return;
+    }
+    const bytes = base64ToBytes(info.value.data[0]);
+    const state = decodeFuseState(bytes);
+    renderState(state, BigInt(info.value.lamports));
+    setLive(true);
+    pollFailCount = 0;
+  } catch (e) {
+    pollFailCount++;
+    setLive(false, pollFailCount > 3 ? "RPC unreachable" : "reconnecting…");
+  }
+}
+
+function setLive(on, label) {
+  document.getElementById("liveDot").classList.toggle("on", !!on);
+  document.getElementById("liveLabel").textContent = label || (on ? "live" : "connecting…");
+}
+
+// ============================================================================
+// Boot
+// ============================================================================
+async function boot() {
+  // The banner is driven by CONFIG.IS_DEVNET, never hardcoded: on mainnet it must NOT
+  // claim "no real money is at risk", because real money is exactly what is at risk.
+  const banner = document.getElementById("networkBanner");
+  if (CONFIG.IS_DEVNET) {
+    banner.innerHTML = "⚠ Running on Solana <b>Devnet</b> — this is the test deployment. No real money is at risk here.";
+    banner.style.display = "";
+  } else {
+    banner.innerHTML = "Running on Solana <b>Mainnet</b> — real SOL. Only fund the burner with what you are willing to lose.";
+    banner.style.display = "";
+  }
+
+  document.getElementById("programIdFooter").textContent = short(CONFIG.PROGRAM_ID);
+  document.getElementById("fuseAddrFooter").textContent = short(CONFIG.FUSE_PDA);
+
+  if (CONFIG.TOKEN_CA) {
+    document.getElementById("tokenCaDisplay").textContent = CONFIG.TOKEN_CA;
+    const buyLink = document.getElementById("tokenBuyLink");
+    buyLink.href = "https://pump.fun/coin/" + CONFIG.TOKEN_CA;
+    buyLink.style.display = "inline-block";
+  }
+
+  document.getElementById("connectBtn").addEventListener("click", connectWallet);
+  document.getElementById("fundBtn").addEventListener("click", fundBurner);
+  document.getElementById("withdrawBtn").addEventListener("click", withdrawBurner);
+  document.getElementById("clickBtn").addEventListener("click", doClick);
+  document.getElementById("settleBtn").addEventListener("click", doSettle);
+
+  await Burner.load();
+  document.getElementById("burnerAddr").textContent = Burner.publicKeyB58;
+  refreshClickButton();
+  refreshBurnerBalance();
+
+  await refreshState();
+  setInterval(refreshState, 1000);
+  setInterval(refreshBurnerBalance, 5000);
+
+  // If Phantom is already connected from a previous visit (trusted app), pick it up silently.
+  const provider = getPhantomProvider();
+  if (provider) {
+    try {
+      const resp = await provider.connect({ onlyIfTrusted: true });
+      Wallet.provider = provider;
+      Wallet.publicKeyB58 = resp.publicKey.toString();
+      document.getElementById("beneficiaryAddr").textContent = Wallet.publicKeyB58;
+      document.getElementById("connectBtn").textContent = "Connected";
+      document.getElementById("connectBtn").disabled = true;
+      document.getElementById("fundBtn").disabled = false;
+      refreshClickButton();
+    } catch (e) { /* not previously trusted, user must click Connect */ }
+  }
+}
+
+// (FUSE_PDA now lives in the CONFIG block at the top, so the whole devnet->mainnet
+//  switch is one contiguous edit instead of two edits 640 lines apart.)
+
+boot().catch((e) => {
+  console.error(e);
+  showMsg("clickMsg", "err", "Startup failed: " + (e.message || e));
+});
+</script>
+</body>
+</html>
