@@ -54,7 +54,7 @@
     .main-grid > .col { display: contents; }
     #fuseCard { order: 1; }
     #walletCard { order: 2; }
-    #rulesCard { order: 3; }
+    #feedCard { order: 3; }
   }
   @media (max-width: 620px) {
     .title-row { align-items: flex-start; }
@@ -152,6 +152,22 @@
   .rule .rk { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--dim); }
   .rule .rv { font-size: 13.5px; font-weight: 700; margin-top: 2px; }
   .rule .rv em { font-style: normal; color: var(--ember2); }
+  .feed { max-height: 128px; overflow-y: auto; display: flex; flex-direction: column; gap: 5px; }
+  .fitem { display: flex; justify-content: space-between; align-items: baseline; gap: 8px;
+           font-size: 12px; padding: 5px 9px; background: var(--panel2);
+           border: 1px solid var(--line); border-radius: 7px; }
+  .fitem .what { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fitem .what b { color: var(--ember2); font-weight: 700; }
+  .fitem .what b.win { color: var(--good); }
+  .fitem .what b.bad { color: var(--bad); }
+  .fitem .when { color: var(--dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 7px; }
+  .chip { background: var(--panel2); border: 1px solid var(--line); border-radius: 999px;
+          padding: 5px 11px; font-size: 12px; }
+  .chip b { color: var(--ember2); }
+  .chip b.good { color: var(--good); }
+
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   @media (max-width: 480px) { .grid2 { grid-template-columns: 1fr; } }
 </style>
@@ -218,18 +234,11 @@
     <div id="clickMsg"></div>
   </div>
 
-  <div class="card" id="rulesCard">
-  <div class="rules">
-    <div class="rule"><div class="rk">to win</div><div class="rv">be the <em>last</em> clicker</div></div>
-    <div class="rule"><div class="rk">winner takes</div><div class="rv"><em>90%</em> of the pot</div></div>
-    <div class="rule"><div class="rk">fuse length</div><div class="rv">300s, <em>−3s</em> per click</div></div>
-    <div class="rule"><div class="rk">click price</div><div class="rv">0.002 SOL, <em>+5%</em> each</div></div>
-    <div class="rule"><div class="rk">last 10 seconds</div><div class="rv"><em>3×</em> snipe tax</div></div>
-    <div class="rule"><div class="rk">rolls over</div><div class="rv"><em>9%</em> seeds next round</div></div>
+  <div class="card" id="feedCard">
+    <div class="section-title">live from the chain</div>
+    <div class="feed" id="feed"><div class="dim" style="font-size:12px;">reading recent transactions…</div></div>
+    <div class="dim" style="font-size:11px; margin-top:7px;">Every line is a real transaction against the program. Nothing here is simulated or stored on a server.</div>
   </div>
-</div>
-
-
   </div>
 
   <div class="col">
@@ -283,8 +292,22 @@
 
 </div>
 
+<div class="card" id="rulesCard">
+  <div class="chips">
+    <span class="chip">the <b>last</b> click before it burns out wins</span>
+    <span class="chip">winner <b class="good">90%</b></span>
+    <span class="chip">cranker <b>1%</b></span>
+    <span class="chip">rolls over <b>9%</b></span>
+    <span class="chip">fuse <b>300s</b>, <b>−3s</b> per click</span>
+    <span class="chip">click <b>0.002</b> SOL, <b>+5%</b> each</span>
+    <span class="chip">last 10s: <b>3×</b> snipe tax</span>
+    <span class="chip"><b>100%</b> of every click goes to the pot</span>
+    <span class="chip"><b class="good">66.33%</b> of every $FUSE fee feeds the pot</span>
+  </div>
+</div>
+
 <div class="card">
-  <div class="section-title">receipts</div>
+  <div class="section-title">your receipts</div>
   <div class="receipts" id="receipts">
     <div class="dim" style="font-size:12.5px;">Nothing yet. Fund the burner and click the fuse.</div>
   </div>
@@ -1018,6 +1041,82 @@ async function refreshImmutability() {
   }
 }
 
+// A live window into the program itself: the last few transactions that touched the fuse account,
+// labelled by what they actually did. The instruction discriminator says which of the three
+// instructions ran (0 init, 1 click, 2 settle) and the balance deltas say where the lamports went,
+// so nothing here is inferred from a server's idea of the game — it is read back out of the chain.
+// Confirmed transactions never change, so each one is parsed once and cached by signature.
+const feedCache = new Map();
+let feedBusy = false;
+
+function timeAgo(sec) {
+  if (!sec) return "";
+  const d = Math.max(0, Math.floor(Date.now() / 1000) - sec);
+  if (d < 60) return d + "s ago";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+
+function describeTx(tx) {
+  if (tx.meta && tx.meta.err) return '<b class="bad">failed</b> — the program rejected it, nothing moved';
+  const keys = tx.transaction.message.accountKeys.map((k) => (k.pubkey ? k.pubkey : k));
+  const delta = (pubkey) => {
+    const i = keys.indexOf(pubkey);
+    return i < 0 ? 0 : tx.meta.postBalances[i] - tx.meta.preBalances[i];
+  };
+  const payer = keys[0];
+  const fuseDelta = delta(CONFIG.FUSE_PDA);
+  let winner = null, won = 0;
+  keys.forEach((k, i) => {
+    const d = tx.meta.postBalances[i] - tx.meta.preBalances[i];
+    if (k !== CONFIG.FUSE_PDA && k !== payer && d > won) { won = d; winner = k; }
+  });
+  let kind = null;
+  for (const ix of tx.transaction.message.instructions) {
+    const pid = ix.programId || keys[ix.programIdIndex];
+    if (pid !== CONFIG.PROGRAM_ID || !ix.data) continue;
+    const b = MiniSol.b58decode(ix.data);
+    if (b.length) kind = b[0];
+  }
+  const paid = winner ? '<b class="win">' + fmtSol(BigInt(won), 4) + " SOL</b> paid to " + short(winner) : null;
+  if (kind === 0) return "<b>round opened</b> — the fuse account was created";
+  if (kind === 2) return paid ? "<b>cranked</b> — " + paid : "<b>cranked</b> — the round rolled with no winner";
+  if (kind === 1) {
+    if (paid) return "<b>clicked</b> — settled the previous round, " + paid;
+    return "<b>clicked</b> — pot <b>+" + fmtSol(BigInt(Math.max(0, fuseDelta)), 4) + " SOL</b>, new holder";
+  }
+  return "touched the fuse account";
+}
+
+async function refreshFeed() {
+  if (feedBusy) return;
+  feedBusy = true;
+  try {
+    const sigs = await rpc("getSignaturesForAddress", [CONFIG.FUSE_PDA, { limit: 8 }]);
+    const rows = [];
+    for (const s of sigs) {
+      if (!feedCache.has(s.signature)) {
+        const tx = await rpc("getTransaction", [s.signature, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed", commitment: "confirmed" }]);
+        if (!tx) continue;
+        feedCache.set(s.signature, describeTx(tx));
+      }
+      rows.push({ sig: s.signature, when: s.blockTime, html: feedCache.get(s.signature) });
+    }
+    if (!rows.length) return;
+    const el = document.getElementById("feed");
+    el.innerHTML = rows.map((r) =>
+      '<div class="fitem"><span class="what">' + r.html + '</span>' +
+      '<a class="when" href="https://explorer.solana.com/tx/' + r.sig + CONFIG.EXPLORER_CLUSTER_QS +
+      '" target="_blank" rel="noopener">' + timeAgo(r.when) + " ↗</a></div>"
+    ).join("");
+  } catch (e) {
+    /* transient RPC hiccup — the existing rows stay on screen rather than blinking out */
+  } finally {
+    feedBusy = false;
+  }
+}
+
 let lastState = null;
 
 function renderState(state, fuseLamports) {
@@ -1172,6 +1271,8 @@ async function boot() {
 
   refreshImmutability();
   setInterval(refreshImmutability, 60000);
+  refreshFeed();
+  setInterval(refreshFeed, 12000);
 
   await refreshState();
   setInterval(refreshState, 1000);
