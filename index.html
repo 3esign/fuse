@@ -302,7 +302,7 @@
     <span class="chip">click <b>0.002</b> SOL, <b>+5%</b> each</span>
     <span class="chip">last 10s: <b>3×</b> snipe tax</span>
     <span class="chip"><b>100%</b> of every click goes to the pot</span>
-    <span class="chip"><b class="good">66.33%</b> of every $FUSE fee feeds the pot</span>
+    <span class="chip"><b class="good">67%</b> of every $FUSE fee feeds the pot</span>
   </div>
 </div>
 
@@ -336,18 +336,19 @@
     <div class="section-title">how this pot is funded</div>
     <div class="dim" style="font-size:12.5px; line-height:1.65;">
       Every click pays into the pot directly — 100% of the click price, no house cut. On top of that,
-      <b>$FUSE</b> trading fees feed the pot: a fixed share of every pump.fun creator fee is swept in
-      automatically. You never need to hold $FUSE to play.
+      <b>$FUSE</b> trading fees feed the pot: <b>67%</b> of every pump.fun creator fee is routed to the
+      pot's own address and 33% to the creator, set once in pump.fun's fee-sharing config and
+      irreversible. You never need to hold $FUSE to play.
     </div>
     <div class="stat-grid" style="margin-top:11px;">
       <div class="stat">
         <div class="k">to the pot</div>
-        <div class="v">66.33%</div>
+        <div class="v">67%</div>
         <div class="sub">of every $FUSE creator fee</div>
       </div>
       <div class="stat">
         <div class="k">to the creator</div>
-        <div class="v">33.67%</div>
+        <div class="v">33%</div>
         <div class="sub">locked at launch, irreversible</div>
       </div>
     </div>
@@ -404,7 +405,7 @@ const CONFIG = {
   PRIORITY_MICROLAMPORTS: 100000,
   // Paste the $FUSE mint address here once the token is live on pump.fun. Leave empty until then —
   // the "how this pot is funded" card shows "not launched yet" and hides the Buy link automatically.
-  TOKEN_CA: "",
+  TOKEN_CA: "2zg6jvhPz3SJYWjDW6PvFWgPTsDxaVPPa3Ea7YZcpump",
 };
 
 // ============================================================================
@@ -946,6 +947,19 @@ async function doSettle() {
     const nowSec = BigInt(Math.floor(Date.now() / 1000));
     if (nowSec <= state.deadline) throw new Error("fuse hasn't burned out yet");
     if (state.clicks === 0n) throw new Error("no clicks this round — it will just roll on the next click, nothing to settle");
+    // Settling costs the cranker nothing but the network fee — yet an empty burner still cannot pay
+    // that fee, and the RPC reports it as "Attempt to debit an account but found no record of a
+    // prior credit", which tells a player nothing at all.
+    const crankBal = await rpc("getBalance", [Burner.publicKeyB58, { commitment: "confirmed" }])
+      .then((r) => BigInt(r.value))
+      .catch(() => null);
+    if (crankBal !== null && crankBal < 20000n) {
+      throw new Error(
+        "the burner holds " + fmtSol(crankBal, 4) + " SOL, which is not enough to pay the network " +
+        "fee for the settle. Fund it with a little and try again — the 1% tip lands in the burner."
+      );
+    }
+
     const ix = settleIx({ crankerB58: Burner.publicKeyB58, fuseB58: CONFIG.FUSE_PDA, holderB58: state.holder });
     const signature = await sendBurnerTx([ix]);
     const receipt = addReceipt("pending", "Settle sent…", signature);
